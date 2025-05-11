@@ -12,10 +12,12 @@ class DataMigrationTests {
     var container: ModelContainer!
     var modelContext: ModelContext!
     var databaseUrl: URL!
+    private var existingSettingID = UUID()
 
     init() {
+        databaseUrl = FileManager.default.temporaryDirectory.appending(component: "test.store")
         do {
-            databaseUrl = FileManager.default.temporaryDirectory.appending(component: "test.store")
+            cleanUp(databaseUrl: databaseUrl)
             container = try SwiftDataSharedContainer().createSharedModelContainer(
                 databaseUrl: databaseUrl,
                 versionSchema: SchemaV1.self
@@ -23,21 +25,17 @@ class DataMigrationTests {
             modelContext = ModelContext(container)
             loadSchemaV1Data()
         } catch {
+            cleanUp(databaseUrl: databaseUrl)
             fatalError("Failed to initialize container")
         }
     }
-
-    deinit {
-        try? FileManager.default.removeItem(at: self.databaseUrl)
-        try? FileManager.default.removeItem(at:
-            self.databaseUrl.deletingPathExtension().appendingPathExtension("store-shm")
-        )
-        try? FileManager.default.removeItem(at:
-            self.databaseUrl.deletingPathExtension().appendingPathExtension("store-wal")
-        )
-        self.container = nil
-        self.modelContext = nil
-        self.databaseUrl = nil
+    
+    private func cleanUp(databaseUrl: URL) {
+        try? FileManager.default.removeItem(at: databaseUrl)
+        try? FileManager.default.removeItem(at:databaseUrl.deletingPathExtension().appendingPathExtension("store-shm"))
+        try? FileManager.default.removeItem(at:databaseUrl.deletingPathExtension().appendingPathExtension("store-wal"))
+        modelContext = nil
+        container = nil
     }
 
     private func loadSchemaV1Data() {
@@ -51,7 +49,7 @@ class DataMigrationTests {
         try! modelContext.save()
         
         let setting = SchemaV1.SettingModel(
-            id: UUID(),
+            id: existingSettingID,
             isNotificationEnabled: true
         )
         modelContext.insert(setting)
@@ -65,10 +63,10 @@ class DataMigrationTests {
         #expect(todos[0].isFinished == true)
         #expect(todos[0].createdAt == 1)
         
-        
         let settingV1 = try! modelContext.fetch(FetchDescriptor<SchemaV1.SettingModel>())
         #expect(settingV1.count == 1)
         #expect(settingV1[0].isNotificationEnabled == true)
+        #expect(settingV1[0].id == existingSettingID)
 
         // Simulate upgrade
         container = try! SwiftDataSharedContainer().createSharedModelContainer(
@@ -85,11 +83,12 @@ class DataMigrationTests {
         #expect(todosV2[0].isFinished == true)
         #expect(todosV2[0].createdAt == 1)
         
-        // Check new property `isEnableSyncCalendar` value
+        // Check renamed property `isPushNotificationEnabled` and new property `isEnableSyncCalendar` value
         let settingV2 = try! modelContext.fetch(FetchDescriptor<SchemaV2.SettingModel>())
         #expect(settingV2.count == 1)
-        #expect(settingV2[0].isNotificationEnabled == true)
-        #expect(settingV2[0].isEnableSyncCalendar == true)
+        #expect(settingV2[0].isPushNotificationEnabled == true)
+        #expect(settingV2[0].isEnableSyncCalendar == false)
+        #expect(settingV2[0].id == existingSettingID)
         
         // Simulate downgrade
         container = try! SwiftDataSharedContainer().createSharedModelContainer(
@@ -99,8 +98,10 @@ class DataMigrationTests {
         )
         modelContext = ModelContext(container)
         
+        // Check old property `isNotificationEnabled` value
         let settingV1Downgrade = try! modelContext.fetch(FetchDescriptor<SchemaV1.SettingModel>())
         #expect(settingV1Downgrade.count == 1)
-        #expect(settingV1Downgrade[0].isNotificationEnabled == false) // Change to `false` when executing DowngradeMigrationPlan.migrateV2toV1.didMigrate
+        #expect(settingV1Downgrade[0].isNotificationEnabled == true)
+        #expect(settingV1Downgrade[0].id == existingSettingID)
     }
 }
